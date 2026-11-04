@@ -56,7 +56,7 @@ class PromptLibraryTests(unittest.TestCase):
         self.assertEqual(count, 2)
         self.assertEqual(output["ui"]["prompt_library"][0]["count"], 2)
         self.assertEqual(output["ui"]["prompt_library"][0]["preview"], prompts)
-        self.assertIn("\\n", text)
+        self.assertIn("\n", text)
         self.assertEqual(node.run("default", snap, "", "Sequential N", 1, 1, 0)["result"][0], ["side view"])
         self.assertEqual(node.run("default", snap, "", "Random N", 2, 0, 123)["result"][0],
                          node.run("default", snap, "", "Random N", 2, 0, 123)["result"][0])
