@@ -32,6 +32,28 @@ Restart ComfyUI and **hard-refresh your browser**. Add **📚 Prompt Library** f
 
 **Important:** `prompts` is a native ComfyUI list-execution output (one call per selected prompt for ordinary downstream nodes), whereas `prompts_text` is one single newline-separated string. The text output may be ambiguous if a prompt itself contains newlines; use `prompts` for individual prompt processing. If no prompts are selected, `prompts` is empty and downstream list-executed nodes might not run.
 
+
+## Checking that prompts actually execute
+
+The button displays **3 selected · not run** until ComfyUI executes the node.
+After it executes, the label changes to **3 selected · ran 3** (or **ran 0**
+if the backend received an empty snapshot). You can queue the Prompt Library
+**by itself**; it is an output node for diagnostic purposes.
+
+For an easy sanity check, connect the **prompts_text** output (the middle
+STRING output) to a **Show Text** node. That is one newline-separated string.
+The top **prompts** output uses `OUTPUT_IS_LIST` to run downstream nodes
+once per prompt. With `prompts`, a list-aware consumer is recommended.
+
+If the button says **ran 3** but a third-party Show Text remains blank,
+the Prompt Library executed successfully; the display extension may have a
+frontend compatibility problem. Some versions of Custom-Scripts Show Text
+have broken after ComfyUI frontend updates. Inspect browser devtools for
+errors in `showText.js`, update the custom script, or try another text
+preview node. If the button still says **not run**, check the ComfyUI
+terminal and the frontend's queue/validation errors, and verify the node
+is not muted or bypassed.
+
 ## Persistence and portability
 
 Libraries are saved as `user/default/prompt_library/<name>.json` relative to ComfyUI's user directory (normally `ComfyUI/user/default/prompt_library`), or in `COMFYUI_PROMPT_LIBRARY_DIR` when that environment variable is set. **On ephemeral pods, mount this directory on persistent storage**, or export the JSON and import it on the next pod.
