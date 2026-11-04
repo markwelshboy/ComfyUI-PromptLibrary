@@ -160,6 +160,7 @@ class PromptLibraryNode:
     RETURN_TYPES = ("STRING", "STRING", "INT")
     RETURN_NAMES = ("prompts", "prompts_text", "prompt_count")
     OUTPUT_IS_LIST = (True, False, False)
+    OUTPUT_NODE = True  # Allow standalone queueing for diagnostics.
     FUNCTION = "run"
     CATEGORY = "Prompt Library"
     DESCRIPTION = "Open the Prompt Manager to select prompts across groups. The selection is embedded in the workflow."
@@ -180,7 +181,12 @@ class PromptLibraryNode:
         prefix = trigger.strip()
         if prefix:
             prompts = [f"{prefix}, {prompt}" for prompt in prompts]
-        return (prompts, "\n".join(prompts), len(prompts))
+        # Execution receipt independent of third-party Show Text rendering.
+        count = len(prompts)
+        return {
+            "ui": {"prompt_library": [{"count": count, "preview": prompts[:3]}]},
+            "result": (prompts, "\n".join(prompts), count),
+        }
 
 
 NODE_CLASS_MAPPINGS = {"PromptLibraryNode": PromptLibraryNode}
