@@ -162,10 +162,19 @@ function createManager(node) {
         if (apply) {
             const selected = allPrompts(state.lib).filter((prompt) => state.selected.has(prompt.id));
             // Selected prompt text is stored in the workflow for portable execution.
-            widget(node, "selection_json").value = JSON.stringify({
+            const selectionWidget = widget(node, "selection_json");
+            if (!selectionWidget) {
+                message("Selection widget is missing; cannot apply prompts.", true);
+                return;
+            }
+            selectionWidget.value = JSON.stringify({
                 version: 1, library: state.name,
                 selected: selected.map((prompt) => ({ id: prompt.id, text: prompt.text })),
             });
+            // Keep the hidden snapshot in queued prompts and saved workflows.
+            selectionWidget.options = { ...selectionWidget.options, serialize: true };
+            selectionWidget.serialize = true;
+            node._promptLibraryLastCount = undefined;
             widget(node, "library_name").value = state.name;
             updateNodeLabel(node);
             node.setDirtyCanvas?.(true, true);
@@ -452,7 +461,10 @@ function updateNodeLabel(node) {
     if (control) {
         control._promptLibraryButton = true;
         control.name = "📚 Open Prompt Manager";
-        control.label = `📚 Manage prompts (${snapshot.selected.length} selected)`;
+        const lastRun = Number.isInteger(node._promptLibraryLastCount)
+            ? " · ran " + node._promptLibraryLastCount
+            : " · not run";
+        control.label = "📚 Manage prompts (" + snapshot.selected.length + " selected" + lastRun + ")";
     }
 }
 
@@ -473,6 +485,8 @@ app.registerExtension({
             const stored = widget(this, "selection_json");
             if (stored) {
                 // Keep the embedded snapshot serialized but off the node canvas.
+                stored.options = { ...stored.options, serialize: true };
+                stored.serialize = true;
                 stored.computeSize = () => [0, -4];
                 stored.hidden = true;
             }
@@ -481,6 +495,18 @@ app.registerExtension({
             updateNodeLabel(this);
             this.setSize([Math.max(300, this.size[0]), this.computeSize()[1]]);
             return result;
+        };
+
+        const previousExecuted = nodeType.prototype.onExecuted;
+        nodeType.prototype.onExecuted = function (message) {
+            previousExecuted?.apply(this, arguments);
+            const receipt = message?.prompt_library?.[0];
+            if (receipt && Number.isInteger(receipt.count)) {
+                this._promptLibraryLastCount = receipt.count;
+                this._promptLibraryLastPreview = receipt.preview || [];
+            }
+            updateNodeLabel(this);
+            app.graph?.setDirtyCanvas?.(true, true);
         };
     },
 });
