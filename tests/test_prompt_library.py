@@ -47,16 +47,24 @@ class PromptLibraryTests(unittest.TestCase):
 
     def test_selection_and_prefix(self):
         snap = json.dumps({"version": 1, "selected": [{"id": "1", "text": "front view"}, {"id": "2", "text": "side view"}, {"id": "3", "text": "back view"}]})
-        run = module.PromptLibraryNode.run
-        prompts, text, count = run("default", snap, "sH1VX woman", "Selected", 2, 0, 0)
+        node = module.PromptLibraryNode
+        self.assertTrue(node.OUTPUT_NODE)
+        self.assertEqual(node.OUTPUT_IS_LIST, (True, False, False))
+        output = node.run("default", snap, "sH1VX woman", "Selected", 2, 0, 0)
+        prompts, text, count = output["result"]
         self.assertEqual(prompts, ["sH1VX woman, front view", "sH1VX woman, side view"])
         self.assertEqual(count, 2)
-        self.assertIn("\n", text)
-        self.assertEqual(run("default", snap, "", "Sequential N", 1, 1, 0)[0], ["side view"])
-        self.assertEqual(run("default", snap, "", "Random N", 2, 0, 123)[0], run("default", snap, "", "Random N", 2, 0, 123)[0])
+        self.assertEqual(output["ui"]["prompt_library"][0]["count"], 2)
+        self.assertEqual(output["ui"]["prompt_library"][0]["preview"], prompts)
+        self.assertIn("\\n", text)
+        self.assertEqual(node.run("default", snap, "", "Sequential N", 1, 1, 0)["result"][0], ["side view"])
+        self.assertEqual(node.run("default", snap, "", "Random N", 2, 0, 123)["result"][0],
+                         node.run("default", snap, "", "Random N", 2, 0, 123)["result"][0])
 
     def test_empty_selection(self):
-        self.assertEqual(module.PromptLibraryNode.run("default", '{"version":1,"selected":[]}', "", "Selected", 0, 0, 0), ([], "", 0))
+        output = module.PromptLibraryNode.run("default", '{"version":1,"selected":[]}', "", "Selected", 0, 0, 0)
+        self.assertEqual(output["result"], ([], "", 0))
+        self.assertEqual(output["ui"]["prompt_library"][0]["count"], 0)
 
 
 if __name__ == "__main__":
