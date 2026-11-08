@@ -164,3 +164,30 @@ Field/operator allowlists and bound SQL parameters protect the database. Regex/S
 The browser, live filtering, CSV/Parquet importer, search tags, filter presets, deterministic snapshots, trigger replacement and list output are implemented. A **persistent queue controller** (pause/resume/retry for thousands of images) and semantic deduplication/diversity sampling are **not implemented yet**. Verify your particular Krea2 downstream nodes handle ComfyUI list execution as expected. Applying a selection never auto-queues generation.
 
 The stablellama dataset uses a **CC-BY-4.0** license. Its aesthetic and erotic-content scores are LLM-estimated and not reliable ground truth. Follow licensing and consent requirements for generated content.
+
+
+## Sequential prompt queue (one Krea2 image per execution)
+
+**📚 Dataset Prompt Queue** is a third node, designed for prompt-by-prompt Krea2 generation. It shares the **Browse dataset → Apply Selection** modal with 📚 Dataset Prompt Browser, but emits **one STRING caption per Queue Prompt**, rather than the entire list. Using it prevents one queue execution from fanning out into hundreds of downstream Krea2 runs.
+
+Add **Prompt Library → 📚 Dataset Prompt Queue** and click **Browse dataset** to import/filter/select prompts. Click **Apply Selection** to freeze them in the workflow and reset the queue to the first prompt. Wire the node's **prompt** output directly to your text-encoding/Krea2 conditioning path. Set **replace_name** (default: Alice) and **trigger_word** on the queue node for LoRA substitutions.
+
+Compact controls are inspired by [shootthesound's MIT-licensed Sequential Image Loader](https://github.com/shootthesound/ComfyUI-SequentialImageLoader). The code is independently implemented for prompts.
+
+| Control | Behavior |
+|---|---|
+| **Next: X / N** | Shows the caption that the next Queue Prompt will process. |
+| **Scrub slider** | Jump to any selected caption without running it. |
+| **⏮ Reset** | Move back to the first caption. |
+| **‹ Prev / Next ›** | Move the pointer without queueing a new generation. |
+| **⏸ Hold last / Hold next** | Freeze repeated executions on the most recently executed caption or the upcoming caption; **Resume** returns to the previous next-pointer position. |
+| **▶ Queue remaining** | Queue one full workflow execution at a time, sequentially, until the last selected caption finishes. |
+| **■ Stop queueing** | Cancel further automatic submissions without interrupting an already-running generation. |
+| **Current / Next** | Caption previews (including the current trigger-word substitution) for the last executed and upcoming prompts. |
+
+**Key implementation detail:** the frontend hooks ComfyUI's queue submission *after* asynchronous graph serialization, then advances its hidden **sequence_index** for the following queue. The Python node receives the index already serialized into that execution, emits one caption, and reports the **actual executed index/total** in its UI receipt. After an execution-success event, the queue controller requests the next run. Errors or interruptions stop auto-queue. The last prompt stops automatic queueing instead of looping forever.
+
+**Outputs:** prompt (single STRING), index (0-based INT), total (INT), metadata_json (STRING). The metadata includes dataset/revision/record ID and row metadata. The original 📚 Dataset Prompt Browser **prompts** output remains a native multi-prompt ComfyUI list; its behavior has not changed.
+
+**Limitations:** queue-all state is tied to the active browser/ComfyUI session, not a persistent server-side job. The current position is stored in the workflow as a hidden serialized widget, but currently-running jobs and completion/error history are not persisted. Avoid running multiple auto-queue controllers or using ComfyUI's built-in Auto Queue simultaneously on the same graph. For production-scale thousands-of-image work, a future server-backed job ledger should handle retries and resume-from-completed rather than assuming the pointer means success. This first implementation is subject to frontend validation against your deployed ComfyUI build.
+

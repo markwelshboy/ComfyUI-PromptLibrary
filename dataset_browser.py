@@ -536,8 +536,79 @@ class PromptDatasetBrowserNode:
                 "result": (prompts, "\n".join(prompts), len(prompts), json.dumps(metadata, ensure_ascii=False))}
 
 
-NODE_CLASS_MAPPINGS = {"PromptDatasetBrowserNode": PromptDatasetBrowserNode}
-NODE_DISPLAY_NAME_MAPPINGS = {"PromptDatasetBrowserNode": "📚 Dataset Prompt Browser"}
+
+class PromptDatasetQueueNode:
+    """One frozen prompt per queue execution, without ComfyUI list fan-out.
+
+    The frontend advances sequence_index after queuePrompt serializes the
+    workflow. This node itself has no state and no dataset access at run time.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "dataset_name": ("STRING", {"default": HF_REPOSITORY}),
+            "selection_json": ("STRING", {"default": '{"version":1,"selected":[]}'}),
+            "replace_name": ("STRING", {"default": "Alice"}),
+            "trigger_word": ("STRING", {"default": ""}),
+            "sequence_index": ("INT", {"default": 0, "min": 0, "max": MAX_SELECTED - 1, "step": 1}),
+        }}
+
+    RETURN_TYPES = ("STRING", "INT", "INT", "STRING")
+    RETURN_NAMES = ("prompt", "index", "total", "metadata_json")
+    FUNCTION = "run"
+    CATEGORY = "Prompt Library"
+    OUTPUT_NODE = True
+    DESCRIPTION = (
+        "Queue one frozen dataset caption per run. Use the sequential "
+        "controls to advance or automatically queue the remaining captions."
+    )
+
+    @classmethod
+    def IS_CHANGED(cls, dataset_name, selection_json, replace_name, trigger_word, sequence_index):
+        # Changing index or Apply Selection must invalidate ComfyUI cache.
+        data = json.dumps((selection_json, replace_name, trigger_word, int(sequence_index)),
+                          ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def run(dataset_name, selection_json, replace_name, trigger_word, sequence_index):
+        snapshot = selected_snapshot(selection_json)
+        selected = snapshot["selected"]
+        total = len(selected)
+        if total == 0:
+            raise ValueError("Dataset Prompt Queue has no selected prompts. Open Browser and Apply Selection.")
+        index = int(sequence_index)
+        if not 0 <= index < total:
+            raise ValueError(f"Sequence index {index} is out of range for {total} selected prompts.")
+        entry = selected[index]
+        prompt = replace_placeholder(entry["text"], replace_name, trigger_word)
+        metadata = {
+            "dataset": snapshot.get("dataset", dataset_name),
+            "revision": snapshot.get("revision"),
+            "selection_mode": snapshot.get("mode", "manual"),
+            "id": entry.get("id"),
+            "meta": entry.get("meta", {}),
+            "index": index,
+            "total": total,
+        }
+        return {
+            "ui": {"prompt_dataset_queue": [{
+                "index": index, "total": total,
+                "record_id": entry.get("id"), "prompt": prompt[:320],
+            }]},
+            "result": (prompt, index, total, json.dumps(metadata, ensure_ascii=False)),
+        }
+
+
+NODE_CLASS_MAPPINGS = {
+    "PromptDatasetBrowserNode": PromptDatasetBrowserNode,
+    "PromptDatasetQueueNode": PromptDatasetQueueNode,
+}
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "PromptDatasetBrowserNode": "📚 Dataset Prompt Browser",
+    "PromptDatasetQueueNode": "📚 Dataset Prompt Queue",
+}
 
 
 def register_routes():

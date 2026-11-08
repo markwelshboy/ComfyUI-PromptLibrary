@@ -116,6 +116,30 @@ class DatasetBrowserTests(unittest.TestCase):
         self.assertEqual(dataset.replace_placeholder("Malice & ALICE", "Alice", "trigger"),
                          "Malice & trigger")
 
+
+    def test_sequential_queue_node(self):
+        frozen = dataset.select(self.id, {"mode": "manual", "ids": [2, 1]})["snapshot"]
+        data = json.dumps(frozen)
+        node = dataset.PromptDatasetQueueNode
+        self.assertTrue(node.OUTPUT_NODE)
+        self.assertFalse(getattr(node, "OUTPUT_IS_LIST", False))
+        self.assertEqual(node.RETURN_NAMES, ("prompt", "index", "total", "metadata_json"))
+        self.assertNotEqual(
+            node.IS_CHANGED("name", data, "Alice", "sH1VX woman", 0),
+            node.IS_CHANGED("name", data, "Alice", "sH1VX woman", 1),
+        )
+        first = node.run("name", data, "Alice", "sH1VX woman", 0)
+        self.assertEqual(first["result"][0], "sH1VX woman at sunset with a dress")
+        self.assertEqual(first["result"][1:3], (0, 2))
+        self.assertEqual(first["ui"]["prompt_dataset_queue"][0]["index"], 0)
+        second = node.run("name", data, "Alice", "sH1VX woman", 1)
+        self.assertIn("at the beach", second["result"][0])
+        self.assertEqual(json.loads(second["result"][3])["id"], "unit_test:1")
+        with self.assertRaisesRegex(ValueError, "out of range"):
+            node.run("name", data, "Alice", "sH1VX woman", 2)
+        with self.assertRaisesRegex(ValueError, "no selected prompts"):
+            node.run("name", '{"version":1,"selected":[]}', "Alice", "sH1VX woman", 0)
+
     def test_bad_sql_filter_and_traversal(self):
         for name in ("../escape", "..", "a/b", ""):
             with self.assertRaises(ValueError):
