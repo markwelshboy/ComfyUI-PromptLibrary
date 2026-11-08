@@ -260,7 +260,7 @@ function openBrowser(node) {
             renderTags();
             refreshResults();
         });
-        return el("div", { class: "pld-tag-editor", dataset: { key } }, el("strong", { text: label }), chips, entry);
+        return el("div", { class: "pld-tag-editor" }, el("strong", { text: label }), chips, entry);
     }
     const includeEditor = tagEditor("Include captions", "include");
     const excludeEditor = tagEditor("Exclude captions", "exclude");
