@@ -19,3 +19,4 @@ jobs:
         run: |
           node --check web/prompt_library.js
           node --check web/dataset_browser.js
+          node --check web/dataset_sequencer.js
