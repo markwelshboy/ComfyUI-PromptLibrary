@@ -1,0 +1,15 @@
+.pldq-panel {box-sizing:border-box;display:flex;flex-direction:column;gap:7px;width:100%;height:100%;padding:8px;color:#e1e9f6;font:12px/1.35 system-ui,sans-serif;background:#232b38;border:1px solid #45556b;border-radius:8px;overflow:hidden;}
+.pldq-panel * {box-sizing:border-box;}
+.pldq-status {background:#17212f;border:1px solid #364a64;border-radius:5px;color:#9cccf7;font-weight:700;padding:5px 8px;text-align:center;}
+.pldq-panel input[type=range] {width:100%;margin:0;accent-color:#659acc;cursor:pointer;}
+.pldq-row {display:flex;gap:6px;width:100%;align-items:center;}
+.pldq-row button {flex:1;min-width:0;font:inherit;color:#dbe5f5;background:#33445d;border:1px solid #5b7395;padding:5px 7px;border-radius:5px;cursor:pointer;white-space:nowrap;}
+.pldq-row button:hover:not(:disabled) {background:#495d78;}
+.pldq-row button:disabled {opacity:.45;cursor:default;}
+.pldq-row button:nth-child(1):not(:disabled) {background:#33445d;}
+.pldq-row button:focus-visible {outline:2px solid #9bd6fa;outline-offset:2px;}
+.pldq-progress {flex:1;color:#bfd0e7;text-align:center;font-size:11px;}
+.pldq-row:has(.pldq-box) {align-items:stretch;flex:1;min-height:0;}
+.pldq-box {width:50%;min-width:0;display:flex;flex-direction:column;gap:4px;}
+.pldq-box strong {color:#93c7f2;font-size:11px;}
+.pldq-preview {flex:1;overflow:auto;min-height:65px;max-height:120px;padding:7px;border:1px solid #3c4d62;border-radius:5px;background:#171e2b;color:#b9c9dc;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;}
