@@ -16,4 +16,6 @@ jobs:
       - name: Python unit tests
         run: python -m unittest discover -s tests -v
       - name: Check frontend JavaScript syntax
-        run: node --check web/prompt_library.js
+        run: |
+          node --check web/prompt_library.js
+          node --check web/dataset_browser.js

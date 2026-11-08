@@ -101,3 +101,66 @@ node --check web/prompt_library.js  # if Node.js is installed
 - For now, group selection and text editing operate inside the modal, not as live socket inputs from existing prompt-list nodes: paste/import the old content once.
 - Large selected snapshots increase workflow JSON size. The library can be much larger than the currently applied selection.
 - The default library directory is server-wide, designed for self-hosted ComfyUI; it is not an isolated, permissioned multi-user library service.
+
+
+## Dataset Prompt Browser (CSV / Parquet)
+
+Add **📚 Dataset Prompt Browser** alongside the existing **📚 Prompt Library** node. The original manual prompt manager and its version 1 JSON format remain unchanged.
+
+This node adds a database-backed, **non-executing** dataset explorer. Browse/filter prompts in a large modal without queuing ComfyUI or passing data through the inference graph. **Apply Selection** is the explicit point at which selected captions are embedded into the node's hidden workflow snapshot.
+
+### Quick start with the stablellama dataset
+
+1. Pull this custom node, restart ComfyUI and hard-refresh the browser.
+2. Add **Prompt Library → 📚 Dataset Prompt Browser**.
+3. Click **Browse dataset** → **Import HF CSV**. The source is [stablellama/erotic-image-prompts](https://huggingface.co/datasets/stablellama/erotic-image-prompts), file captions.csv. The dataset documents **82,880** prompts. First import downloads and indexes the CSV; later sessions use cached SQLite.
+4. Enable/disable metadata filters. Operators include numeric comparisons, exact/category matching, and clothing-tag contains/excludes. Searching updates result counts and pages without executing any graph nodes.
+5. Enter **include/exclude caption tags** (press Enter; remove pills with ×). Include supports **ALL / ANY**; exclusions reject captions containing **any** excluded term.
+6. Check individual results or **Check page**; alternatively set **Apply mode** to *All matching prompts* or *Random N from matches* (with a seed). **Apply Selection** freezes captions in the workflow; **Cancel** discards pending selection changes.
+7. On the node configure **replace_name** (default: Alice) and **trigger_word** (for example your LoRA trigger). Literal, case-insensitive whole-word replacement happens **during execution**, without modifying the dataset or snapshot.
+8. Connect **prompts** (ComfyUI list output) to the Krea2 conditioning flow. Other outputs are **prompts_text** (diagnostic joined string), **prompt_count**, and **metadata_json** (source identifiers and per-row metadata).
+
+Dataset character names are placeholders: Alice/Bella/Clara/Diana/Emma and Adam/Bob/Charlie/David/Eric. The replacement field can target any one. An empty trigger leaves captions unchanged.
+
+**Selection limit:** 2,000 prompts / 4 MiB, preventing huge workflow snapshots. If more match your filters, use **Random N** or narrow the filters. Samples with a fixed seed are reproducible. Checked prompts are retained while filtering and are cleared only when explicitly unchecked or cleared.
+
+**Import options:**
+
+- **Import HF CSV (recommended):** uses installed huggingface_hub plus Python's built-in csv and sqlite3. No pandas or datasets library.
+- **Import HF Parquet:** uses native list tags and requires pyarrow in the ComfyUI Python environment (for example, /opt/venv/bin/python -m pip install pyarrow).
+- **Upload CSV/Parquet:** local browser file up to 256 MiB indexed by ComfyUI. Expected columns include Caption, Females, Males, Artistic Quality, Erotic Score, Pornographic Score, Aspect Ratio, Nudity, Clothing. Missing metadata fields are accepted; a nonempty Caption is required. Clothing in CSV is a Python literal list, such as ['hat', 'dress'].
+
+Filter presets are persisted in **browser localStorage per dataset**, not synchronized across devices. They never affect a node's selection until Apply. Selected caption **text** is stored in the saved workflow for offline execution, independently of source files.
+
+### Storage and stateless pods
+
+Indexed databases and source files are stored in:
+
+    COMFYUI_PROMPT_LIBRARY_DIR/
+    └── datasets/
+        └── stablellama_erotic-image-prompts/
+            ├── manifest.json
+            ├── prompts.sqlite
+            └── source/
+                └── captions.csv
+
+Without the environment variable, the location is ComfyUI/user/default/prompt_library/datasets/. On Vast/RunPod, point **COMFYUI_PROMPT_LIBRARY_DIR** at a persistent workspace directory (for example /workspace/prompt-library) **before starting ComfyUI**. Source downloads and the SQLite index stay out of Git; reimporting replaces indexes atomically. The existing manual Prompt Library JSON files use the same root.
+
+### Browser API
+
+All endpoints are same-origin under /prompt_library/api/; no additional port is needed.
+
+- **GET /datasets:** cached datasets.
+- **POST /datasets/import:** import the built-in Hugging Face dataset (format csv or parquet).
+- **POST /datasets/upload:** multipart file upload.
+- **GET /datasets/{id}/schema:** metadata definitions and categorical values.
+- **POST /datasets/{id}/search:** validated filters/tags, paginated results, matched count.
+- **POST /datasets/{id}/select:** freeze checked IDs, all matches, or seeded random sample.
+
+Field/operator allowlists and bound SQL parameters protect the database. Regex/SQL authoring is deliberately excluded in this first version.
+
+### Scope / remaining work
+
+The browser, live filtering, CSV/Parquet importer, search tags, filter presets, deterministic snapshots, trigger replacement and list output are implemented. A **persistent queue controller** (pause/resume/retry for thousands of images) and semantic deduplication/diversity sampling are **not implemented yet**. Verify your particular Krea2 downstream nodes handle ComfyUI list execution as expected. Applying a selection never auto-queues generation.
+
+The stablellama dataset uses a **CC-BY-4.0** license. Its aesthetic and erotic-content scores are LLM-estimated and not reliable ground truth. Follow licensing and consent requirements for generated content.
