@@ -19,6 +19,7 @@ import sqlite3
 import tempfile
 import threading
 from pathlib import Path
+from contextlib import contextmanager
 
 DEFAULT_DATASET = "stablellama_erotic-image-prompts"
 HF_REPOSITORY = "stablellama/erotic-image-prompts"
@@ -100,15 +101,19 @@ def list_datasets():
     return {"datasets": found, "default_dataset": DEFAULT_DATASET, "repository": HF_REPOSITORY}
 
 
+@contextmanager
 def connect(dataset_id):
     read_manifest(dataset_id)
     path = dataset_dir(dataset_id) / "prompts.sqlite"
     if not path.is_file():
         raise FileNotFoundError("Dataset index is missing")
     # Read-only URI prevents a malformed path from creating a new database.
-    db = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)
+    db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
     db.row_factory = sqlite3.Row
-    return db
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def _clothing_tags(value):
