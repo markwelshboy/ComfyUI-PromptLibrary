@@ -450,6 +450,7 @@ function openBrowser(node) {
             const name = widget(node, "dataset_name");
             if (name) name.value = state.manifest.name;
             node._pldLastRun = undefined;
+            node._pldqOnSelectionApplied?.();
             updateLabel(node);
             node.setDirtyCanvas?.(true, true);
             app.graph?.setDirtyCanvas?.(true, true);
@@ -510,7 +511,7 @@ if (!document.getElementById(styleId)) {
 app.registerExtension({
     name: "markwelshboy.PromptLibraryDatasetBrowser",
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "PromptDatasetBrowserNode") return;
+        if (nodeData.name !== "PromptDatasetBrowserNode" && nodeData.name !== "PromptDatasetQueueNode") return;
         const previous = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function (...args) {
             const result = previous?.apply(this, args);
@@ -531,7 +532,9 @@ app.registerExtension({
         nodeType.prototype.onExecuted = function (event) {
             oldExecuted?.apply(this, arguments);
             const receipt = event?.prompt_dataset?.[0];
+            const queueReceipt = event?.prompt_dataset_queue?.[0];
             if (Number.isInteger(receipt?.count)) this._pldLastRun = receipt.count;
+            if (Number.isInteger(queueReceipt?.index)) this._pldLastRun = queueReceipt.index + 1;
             updateLabel(this);
         };
     },
