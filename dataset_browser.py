@@ -491,6 +491,12 @@ def selected_snapshot(value):
     return data
 
 
+def selected_aspect_ratio(item):
+    """Read the CSV/Parquet Aspect Ratio column already embedded in each selected row."""
+    value = item.get("meta", {}).get("aspect_ratio", "")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def replace_placeholder(text, name, trigger):
     if not name.strip() or not trigger.strip():
         return text
@@ -510,9 +516,9 @@ class PromptDatasetBrowserNode:
             "start_index": ("INT", {"default": 0, "min": 0, "max": MAX_SELECTED}),
         }}
 
-    RETURN_TYPES = ("STRING", "STRING", "INT", "STRING")
-    RETURN_NAMES = ("prompts", "prompts_text", "prompt_count", "metadata_json")
-    OUTPUT_IS_LIST = (True, False, False, False)
+    RETURN_TYPES = ("STRING", "STRING", "INT", "STRING", "STRING")
+    RETURN_NAMES = ("prompts", "prompts_text", "prompt_count", "metadata_json", "aspect_ratios")
+    OUTPUT_IS_LIST = (True, False, False, False, True)
     OUTPUT_NODE = True
     FUNCTION = "run"
     CATEGORY = "Prompt Library"
@@ -531,9 +537,11 @@ class PromptDatasetBrowserNode:
             "selection_mode": snapshot.get("mode", "manual"),
             "rows": [{"id": item.get("id"), "meta": item.get("meta", {})} for item in items],
         }
-        receipt = {"count": len(prompts), "preview": prompts[:3]}
+        ratios = [selected_aspect_ratio(item) for item in items]
+        receipt = {"count": len(prompts), "preview": prompts[:3], "aspect_preview": ratios[:3]}
         return {"ui": {"prompt_dataset": [receipt]},
-                "result": (prompts, "\n".join(prompts), len(prompts), json.dumps(metadata, ensure_ascii=False))}
+                "result": (prompts, "\n".join(prompts), len(prompts),
+                           json.dumps(metadata, ensure_ascii=False), ratios)}
 
 
 
@@ -554,8 +562,8 @@ class PromptDatasetQueueNode:
             "sequence_index": ("INT", {"default": 0, "min": 0, "max": MAX_SELECTED - 1, "step": 1}),
         }}
 
-    RETURN_TYPES = ("STRING", "INT", "INT", "STRING")
-    RETURN_NAMES = ("prompt", "index", "total", "metadata_json")
+    RETURN_TYPES = ("STRING", "INT", "INT", "STRING", "STRING")
+    RETURN_NAMES = ("prompt", "index", "total", "metadata_json", "aspect_ratio")
     FUNCTION = "run"
     CATEGORY = "Prompt Library"
     OUTPUT_NODE = True
@@ -597,7 +605,8 @@ class PromptDatasetQueueNode:
                 "index": index, "total": total,
                 "record_id": entry.get("id"), "prompt": prompt[:320],
             }]},
-            "result": (prompt, index, total, json.dumps(metadata, ensure_ascii=False)),
+            "result": (prompt, index, total, json.dumps(metadata, ensure_ascii=False),
+                       selected_aspect_ratio(entry)),
         }
 
 

@@ -105,13 +105,15 @@ class DatasetBrowserTests(unittest.TestCase):
         dataset.dataset_dir(self.id).joinpath("prompts.sqlite").unlink()
         node = dataset.PromptDatasetBrowserNode
         self.assertTrue(node.OUTPUT_NODE)
-        self.assertEqual(node.OUTPUT_IS_LIST, (True, False, False, False))
+        self.assertEqual(node.OUTPUT_IS_LIST, (True, False, False, False, True))
         output = node.run("Anything", selection_json, "Alice", r"sH1VX \woman", 1, 0)
-        prompts, joined, count, meta = output["result"]
+        prompts, joined, count, meta, ratios = output["result"]
         self.assertEqual(count, 1)
         self.assertEqual(prompts[0], "sH1VX \\woman at the beach\nunder the summer sky.")
         self.assertIn("revisionA", meta)
         self.assertEqual(joined, prompts[0])
+        self.assertEqual(ratios, ["2:3"])
+        self.assertEqual(output["ui"]["prompt_dataset"][0]["aspect_preview"], ["2:3"])
         self.assertEqual(output["ui"]["prompt_dataset"][0]["count"], 1)
         self.assertEqual(dataset.replace_placeholder("Malice & ALICE", "Alice", "trigger"),
                          "Malice & trigger")
@@ -123,7 +125,7 @@ class DatasetBrowserTests(unittest.TestCase):
         node = dataset.PromptDatasetQueueNode
         self.assertTrue(node.OUTPUT_NODE)
         self.assertFalse(getattr(node, "OUTPUT_IS_LIST", False))
-        self.assertEqual(node.RETURN_NAMES, ("prompt", "index", "total", "metadata_json"))
+        self.assertEqual(node.RETURN_NAMES, ("prompt", "index", "total", "metadata_json", "aspect_ratio"))
         self.assertNotEqual(
             node.IS_CHANGED("name", data, "Alice", "sH1VX woman", 0),
             node.IS_CHANGED("name", data, "Alice", "sH1VX woman", 1),
@@ -131,9 +133,11 @@ class DatasetBrowserTests(unittest.TestCase):
         first = node.run("name", data, "Alice", "sH1VX woman", 0)
         self.assertEqual(first["result"][0], "sH1VX woman at sunset with a dress")
         self.assertEqual(first["result"][1:3], (0, 2))
+        self.assertEqual(first["result"][4], "3:2")
         self.assertEqual(first["ui"]["prompt_dataset_queue"][0]["index"], 0)
         second = node.run("name", data, "Alice", "sH1VX woman", 1)
         self.assertIn("at the beach", second["result"][0])
+        self.assertEqual(second["result"][4], "2:3")
         self.assertEqual(json.loads(second["result"][3])["id"], "unit_test:1")
         with self.assertRaisesRegex(ValueError, "out of range"):
             node.run("name", data, "Alice", "sH1VX woman", 2)
