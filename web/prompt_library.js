@@ -66,6 +66,15 @@ function validateImportedLibrary(data) {
     return clone(data);
 }
 
+function promptIdentity(prompt) {
+    // Two renders of one caption with different seeds are distinct replay items.
+    if (prompt.source_file) return "source:" + prompt.source_file;
+    const meta = prompt.seed != null || prompt.aspect_ratio || prompt.width || prompt.height;
+    return "text:" + prompt.text.trim() + (meta
+        ? "|" + String(prompt.seed ?? "") + "|" + String(prompt.aspect_ratio ?? "") +
+          "|" + String(prompt.width ?? "") + "|" + String(prompt.height ?? "") : "");
+}
+
 function mergeLibrary(target, imported) {
     const used = new Set(allPrompts(target).map((prompt) => prompt.id));
     const remapped = new Map();
@@ -75,14 +84,15 @@ function mergeLibrary(target, imported) {
             group = { id: uid(), name: sourceGroup.name, keyword: sourceGroup.keyword || "", prompts: [] };
             target.groups.push(group);
         }
-        const byText = new Map(group.prompts.map((prompt) => [prompt.text.trim(), prompt.id]));
+        const byIdentity = new Map(group.prompts.map((prompt) => [promptIdentity(prompt), prompt.id]));
         for (const prompt of sourceGroup.prompts) {
-            let id = byText.get(prompt.text.trim());
+            const key = promptIdentity(prompt);
+            let id = byIdentity.get(key);
             if (!id) {
                 id = used.has(prompt.id) || !prompt.id ? uid() : prompt.id;
-                group.prompts.push({ id, text: prompt.text });
+                group.prompts.push({ ...clone(prompt), id });
                 used.add(id);
-                byText.set(prompt.text.trim(), id);
+                byIdentity.set(key, id);
             }
             remapped.set(prompt.id, id);
         }
@@ -116,6 +126,8 @@ function createManager(node) {
         name, lib: emptyLibrary(name), revision: null, selected: new Set(snapshot.selected.map((item) => item.id)),
         tab: "selection", groupId: null, search: "", show: MAX_ROWS, previewId: null, dirty: false,
         timer: null, queue: Promise.resolve(), saving: false, blocked: false, closed: false,
+        imagePath: "", imageGroup: "Image Replay", imageKeyword: "replay",
+        imageRecursive: false, imageScan: null, imageBusy: false,
     };
     let loadError = null;
 
@@ -169,7 +181,13 @@ function createManager(node) {
             }
             selectionWidget.value = JSON.stringify({
                 version: 1, library: state.name,
-                selected: selected.map((prompt) => ({ id: prompt.id, text: prompt.text })),
+                selected: selected.map((prompt) => {
+                    const entry = { id: prompt.id, text: prompt.text };
+                    for (const field of ["seed", "aspect_ratio", "width", "height", "source_file"]) {
+                        if (Object.hasOwn(prompt, field)) entry[field] = prompt[field];
+                    }
+                    return entry;
+                }),
             });
             // Keep the hidden snapshot in queued prompts and saved workflows.
             selectionWidget.options = { ...selectionWidget.options, serialize: true };
@@ -279,7 +297,13 @@ function createManager(node) {
             rows.append(h("div", { class: "pl-row" },
                 h("div", { class: "pl-row-summary" }, check,
                     button(prompt.text.replace(/\s+/g, " ").slice(0, 170), () => { state.previewId = state.previewId === prompt.id ? null : prompt.id; render(); }, "pl-prompt-preview"),
-                    h("span", { class: "pl-chip", text: prompt.group.name })),
+                    h("span", { class: "pl-chip", text: prompt.group.name }),
+                    prompt.aspect_ratio ? h("span", { class: "pl-chip", text: prompt.aspect_ratio }) : null,
+                    prompt.seed != null ? h("span", { class: "pl-chip", text: "seed " + prompt.seed }) : null,
+                    prompt.source_file ? h("span", {
+                        class: "pl-chip", title: prompt.source_file,
+                        text: prompt.source_file.split(/[\\/]/).pop(),
+                    }) : null),
                 state.previewId === prompt.id ? previewEditor(prompt) : null));
         }
         if (matches.length > state.show) rows.append(button(`Show next ${Math.min(MAX_ROWS, matches.length - state.show)} of ${matches.length}`, () => { state.show += MAX_ROWS; render(); }));
@@ -298,6 +322,98 @@ function createManager(node) {
             rows));
         return view;
     }
+
+    function imageImportPanel() {
+        const pane = h("div", { class: "pl-card" });
+        const directory = input(state.imagePath, "/workspace/ComfyUI/output/selected");
+        const group = input(state.imageGroup, "Image Replay");
+        const keyword = input(state.imageKeyword, "replay");
+        const recursive = h("input", { type: "checkbox", checked: state.imageRecursive });
+        const recordOptions = () => {
+            state.imagePath = directory.value.trim();
+            state.imageGroup = group.value.trim();
+            state.imageKeyword = keyword.value.trim();
+            state.imageRecursive = recursive.checked;
+        };
+        pane.append(
+            h("h3", { text: "Import image prompts for replay" }),
+            h("p", { text: "Scan a directory on the ComfyUI SERVER (e.g. RunPod), not your browser. Extract embedded prompt, seed, and image aspect ratio; review before importing." }),
+            field("Server directory", directory),
+            field("Group name", group),
+            field("Optional group keyword", keyword),
+            field("Include subdirectories", recursive),
+            button(state.imageBusy ? "Scanning…" : "Scan image metadata", async () => {
+                if (state.imageBusy) return;
+                recordOptions();
+                if (!state.imagePath) { message("Enter an image directory path", true); return; }
+                state.imageBusy = true;
+                state.imageScan = null;
+                message("Scanning image files on the server…");
+                try {
+                    const scan = await request("/image-import", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ directory: state.imagePath, recursive: state.imageRecursive }),
+                    });
+                    state.imageScan = scan;
+                    message(scan.entries.length + " replay prompts found; " + scan.skipped_count + " skipped.");
+                } catch (err) {
+                    message(err.message, true);
+                } finally {
+                    state.imageBusy = false;
+                    render();
+                }
+            }, "pl-primary"),
+        );
+        const scan = state.imageScan;
+        if (scan) {
+            const missingSeeds = scan.entries.filter((entry) => entry.seed == null).length;
+            pane.append(
+                h("p", { text: scan.entries.length + " of " + scan.scanned + " images contain recoverable prompts. " +
+                    scan.skipped_count + " skipped. " + missingSeeds + " prompts without recoverable seeds." }),
+                h("div", { class: "pl-image-report" },
+                    ...scan.entries.slice(0, 8).map((entry) =>
+                        h("p", { text: (entry.source_file.split(/[\\/]/).pop()) +
+                            " | seed " + (entry.seed ?? "missing") +
+                            " | " + entry.aspect_ratio + " | " + entry.text.replace(/\s+/g, " ").slice(0, 110) })),
+                    ...(scan.skipped.length
+                        ? [h("p", { text: "Skipped examples: " + scan.skipped.slice(0, 4).map((item) =>
+                            item.filename + " (" + item.reason + ")").join("; ") })] : []),
+                ),
+                button("Import " + scan.entries.length + " prompts into group", () => {
+                    recordOptions();
+                    if (!state.imageGroup) { message("Group name is required", true); return; }
+                    if (!scan.entries.length) { message("No prompts available to import", true); return; }
+                    let target = state.lib.groups.find((item) =>
+                        item.name.toLowerCase() === state.imageGroup.toLowerCase());
+                    if (!target) {
+                        target = { id: uid(), name: state.imageGroup, keyword: state.imageKeyword, prompts: [] };
+                        state.lib.groups.push(target);
+                    } else if (state.imageKeyword) {
+                        target.keyword = state.imageKeyword;
+                    }
+                    const seen = new Set(target.prompts.map(promptIdentity));
+                    let added = 0;
+                    for (const entry of scan.entries) {
+                        const key = promptIdentity(entry);
+                        if (seen.has(key)) continue;
+                        const item = { id: uid(), ...entry };
+                        target.prompts.push(item);
+                        state.selected.add(item.id);
+                        seen.add(key);
+                        added++;
+                    }
+                    state.imageScan = null;
+                    state.groupId = target.id;
+                    state.tab = "selection";
+                    scheduleSave();
+                    render();
+                    message("Imported and selected " + added + " new replay prompts.");
+                }, "pl-primary"),
+            );
+        }
+        return pane;
+    }
+
     function libraryTab() {
         const pane = h("div", { class: "pl-library-tab" });
         const filename = input(state.name);
@@ -403,6 +519,7 @@ function createManager(node) {
                         message("JSON imported; library will auto-save");
                     } catch (err) { message(err.message, true); }
                 }), button("Export JSON", () => downloadJSON(state.name, state.lib)))));
+        pane.append(imageImportPanel());
         return pane;
     }
     function setsTab() {
