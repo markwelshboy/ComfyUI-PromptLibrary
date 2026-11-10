@@ -4,6 +4,7 @@ The workflow holds selected prompt *text*, not just references, so it still runs
 when the library file is missing on another ComfyUI installation.
 """
 
+import asyncio
 import hashlib
 import json
 import os
@@ -129,7 +130,8 @@ def save_library(name, data, expected_revision):
     return revision(raw)
 
 
-def selected_prompts(selection_json):
+def selected_entries(selection_json):
+    """Preserve text *and* optional image provenance through selection/shuffling."""
     try:
         snapshot = json.loads(selection_json)
     except (TypeError, json.JSONDecodeError) as exc:
@@ -141,7 +143,28 @@ def selected_prompts(selection_json):
         raise ValueError("Invalid selected prompts array")
     if any(not isinstance(item, dict) or not isinstance(item.get("text"), str) for item in entries):
         raise ValueError("Selection entries must contain prompt text")
-    return [item["text"] for item in entries if item["text"].strip()]
+    return [item for item in entries if item["text"].strip()]
+
+
+def selected_prompts(selection_json):
+    """Backwards-compatible text-only helper."""
+    return [entry["text"] for entry in selected_entries(selection_json)]
+
+
+def _int_metadata(entry, key, missing):
+    value = entry.get(key)
+    if value is None:
+        return missing
+    try:
+        number = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return missing
+    return number if number >= 0 else missing
+
+
+def _aspect_metadata(entry):
+    ratio = entry.get("aspect_ratio", "")
+    return ratio.strip() if isinstance(ratio, str) else ""
 
 
 class PromptLibraryNode:
@@ -157,9 +180,11 @@ class PromptLibraryNode:
             "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF}),
         }}
 
-    RETURN_TYPES = ("STRING", "STRING", "INT")
-    RETURN_NAMES = ("prompts", "prompts_text", "prompt_count")
-    OUTPUT_IS_LIST = (True, False, False)
+    # Keep existing socket indices stable for saved workflows.
+    RETURN_TYPES = ("STRING", "STRING", "INT", "INT", "STRING", "INT", "INT")
+    RETURN_NAMES = ("prompts", "prompts_text", "prompt_count",
+                    "seeds", "aspect_ratios", "widths", "heights")
+    OUTPUT_IS_LIST = (True, False, False, True, True, True, True)
     OUTPUT_NODE = True  # Allow standalone queueing for diagnostics.
     FUNCTION = "run"
     CATEGORY = "Prompt Library"
@@ -167,25 +192,32 @@ class PromptLibraryNode:
 
     @staticmethod
     def run(library_name, selection_json, trigger, mode, max_prompts, start_index, seed):
-        prompts = selected_prompts(selection_json)
+        entries = selected_entries(selection_json)
         if mode == "Random N":
             rng = random.Random(seed)
-            prompts = rng.sample(prompts, min(max_prompts or len(prompts), len(prompts)))
+            entries = rng.sample(entries, min(max_prompts or len(entries), len(entries)))
         elif mode == "Sequential N":
-            prompts = prompts[start_index:]
+            entries = entries[start_index:]
             if max_prompts:
-                prompts = prompts[:max_prompts]
-        else:
-            if max_prompts:
-                prompts = prompts[:max_prompts]
+                entries = entries[:max_prompts]
+        elif max_prompts:
+            entries = entries[:max_prompts]
         prefix = trigger.strip()
-        if prefix:
-            prompts = [f"{prefix}, {prompt}" for prompt in prompts]
-        # Execution receipt independent of third-party Show Text rendering.
+        prompts = [f"{prefix}, {entry['text']}" if prefix else entry["text"] for entry in entries]
+        seeds = [_int_metadata(entry, "seed", -1) for entry in entries]
+        ratios = [_aspect_metadata(entry) for entry in entries]
+        widths = [_int_metadata(entry, "width", 0) for entry in entries]
+        heights = [_int_metadata(entry, "height", 0) for entry in entries]
+        # -1 denotes missing seed. This deliberately fails sampler validation
+        # rather than silently regenerating the image with an invented seed.
         count = len(prompts)
         return {
-            "ui": {"prompt_library": [{"count": count, "preview": prompts[:3]}]},
-            "result": (prompts, "\n".join(prompts), count),
+            "ui": {"prompt_library": [{
+                "count": count, "preview": prompts[:3],
+                "seed_preview": seeds[:3], "aspect_preview": ratios[:3],
+            }]},
+            "result": (prompts, "\n".join(prompts), count,
+                       seeds, ratios, widths, heights),
         }
 
 
@@ -212,6 +244,22 @@ def register_routes():
             data, current_revision = read_library(name)
             return web.json_response({"library": data, "revision": current_revision})
         except (ValueError, OSError, json.JSONDecodeError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+    @routes.post("/prompt_library/api/image-import")
+    async def import_images(request):
+        from .image_import import scan_images
+
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Expected a JSON object")
+            # File scanning can be slow; do it off the ComfyUI event loop.
+            report = await asyncio.to_thread(
+                scan_images, payload.get("directory"), payload.get("recursive", False) is True
+            )
+            return web.json_response(report)
+        except (ValueError, TypeError, RuntimeError, OSError) as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
     @routes.post("/prompt_library/api/library")

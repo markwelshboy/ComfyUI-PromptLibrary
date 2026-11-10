@@ -49,11 +49,15 @@ class PromptLibraryTests(unittest.TestCase):
         snap = json.dumps({"version": 1, "selected": [{"id": "1", "text": "front view"}, {"id": "2", "text": "side view"}, {"id": "3", "text": "back view"}]})
         node = module.PromptLibraryNode
         self.assertTrue(node.OUTPUT_NODE)
-        self.assertEqual(node.OUTPUT_IS_LIST, (True, False, False))
+        self.assertEqual(node.OUTPUT_IS_LIST, (True, False, False, True, True, True, True))
         output = node.run("default", snap, "sH1VX woman", "Selected", 2, 0, 0)
-        prompts, text, count = output["result"]
+        prompts, text, count, seeds, ratios, widths, heights = output["result"]
         self.assertEqual(prompts, ["sH1VX woman, front view", "sH1VX woman, side view"])
         self.assertEqual(count, 2)
+        self.assertEqual(seeds, [-1, -1])
+        self.assertEqual(ratios, ["", ""])
+        self.assertEqual(widths, [0, 0])
+        self.assertEqual(heights, [0, 0])
         self.assertEqual(output["ui"]["prompt_library"][0]["count"], 2)
         self.assertEqual(output["ui"]["prompt_library"][0]["preview"], prompts)
         self.assertIn("\n", text)
@@ -61,9 +65,27 @@ class PromptLibraryTests(unittest.TestCase):
         self.assertEqual(node.run("default", snap, "", "Random N", 2, 0, 123)["result"][0],
                          node.run("default", snap, "", "Random N", 2, 0, 123)["result"][0])
 
+    def test_image_metadata_stays_aligned_with_random_and_ranges(self):
+        selected = [
+            {"id": "one", "text": "portrait", "seed": 11, "aspect_ratio": "4:5", "width": 1024, "height": 1280},
+            {"id": "two", "text": "beach", "seed": 22, "aspect_ratio": "16:9", "width": 1600, "height": 900},
+            {"id": "three", "text": "studio", "seed": 33, "aspect_ratio": "1:1", "width": 1024, "height": 1024},
+        ]
+        snap = json.dumps({"version": 1, "selected": selected})
+        run = module.PromptLibraryNode.run
+        result = run("default", snap, "", "Sequential N", 1, 1, 0)["result"]
+        self.assertEqual(result[0], ["beach"])
+        self.assertEqual(result[3:], ([22], ["16:9"], [1600], [900]))
+        shuffled = run("default", snap, "", "Random N", 3, 0, 7)["result"]
+        keyed = {item["text"]: item for item in selected}
+        for prompt, seed, ratio, width, height in zip(shuffled[0], *shuffled[3:]):
+            item = keyed[prompt]
+            self.assertEqual((seed, ratio, width, height),
+                             (item["seed"], item["aspect_ratio"], item["width"], item["height"]))
+
     def test_empty_selection(self):
         output = module.PromptLibraryNode.run("default", '{"version":1,"selected":[]}', "", "Selected", 0, 0, 0)
-        self.assertEqual(output["result"], ([], "", 0))
+        self.assertEqual(output["result"], ([], "", 0, [], [], [], [],))
         self.assertEqual(output["ui"]["prompt_library"][0]["count"], 0)
 
 
