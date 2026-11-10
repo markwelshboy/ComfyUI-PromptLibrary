@@ -60,10 +60,24 @@ class ImageReplayTests(unittest.TestCase):
             report = module.scan_images(str(root))
             self.assertEqual(report["scanned"], 2)
             self.assertEqual(report["skipped_count"], 1)
-            self.assertEqual(report["entries"][0]["seed"], 47)
+            self.assertEqual(report["entries"][0]["seed"], "47")
             self.assertEqual(report["entries"][0]["aspect_ratio"], "4:5")
             self.assertEqual(report["entries"][0]["text"], "soft portrait")
             self.assertEqual(report["entries"][0]["width"], 640)
+
+    def test_seed_bigger_than_javascript_safe_integer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            if Image is None:
+                self.skipTest("Pillow needed")
+            from PIL import PngImagePlugin
+            root = Path(tmp)
+            large_seed = 18446744073709551615
+            meta = PngImagePlugin.PngInfo()
+            graph = {"1": {"class_type": "TextEncode", "inputs": {"text": "portrait"}},
+                     "2": {"class_type": "KSampler", "inputs": {"seed": large_seed, "positive": ["1", 0]}}}
+            meta.add_text("prompt", json.dumps(graph))
+            Image.new("RGB", (800, 1000)).save(root / "big_seed.png", pnginfo=meta)
+            self.assertEqual(module.scan_images(str(root))["entries"][0]["seed"], str(large_seed))
 
     def test_invalid_folder(self):
         with self.assertRaises(ValueError):

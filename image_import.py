@@ -184,7 +184,10 @@ def extract_image(path):
         parsed = extract_comfy(blob) if key == "prompt" else extract_parameters(blob)
         if parsed is None:
             continue
-        return {"text": parsed["text"], "seed": parsed["seed"],
+        # JSON numbers above 2**53 lose precision in the JavaScript frontend.
+        # Store the seed as decimal text in the library, turn it back into an
+        # exact Python INT when the node executes.
+        return {"text": parsed["text"], "seed": str(parsed["seed"]) if parsed["seed"] is not None else None,
                 "aspect_ratio": ratio_for_size(width, height),
                 "width": width, "height": height, "source_file": str(path)}, None
     return None, "No supported prompt metadata (or prompt could not be traced)"
