@@ -11,6 +11,7 @@ A visual, portable prompt library for ComfyUI. Replace stacks of giant text widg
 - Keep libraries as standard JSON files **outside the custom node repository**.
 - **Workflow-portable**: applying a selection embeds its text into the node's hidden `selection_json` widget. The workflow can still run without the library file on another machine.
 - Output a real ComfyUI `OUTPUT_IS_LIST` of individual `STRING`s, plus newline-separated text and count.
+- Import image metadata for prompt/seed/ratio replay; emit index-aligned seed, aspect ratio, width and height lists.
 - Optional trigger prefix; Selected, Random N (seeded), or Sequential N (starting at zero-based index) output modes.
 - No extra Python or frontend packages beyond the standard ComfyUI installation.
 
@@ -31,6 +32,82 @@ Restart ComfyUI and **hard-refresh your browser**. Add **📚 Prompt Library** f
 4. On the node, set `trigger`, `mode`, `max_prompts` (`0` means all), `start_index`, and `seed`; connect the **prompts** output to the downstream `STRING` input.
 
 **Important:** `prompts` is a native ComfyUI list-execution output (one call per selected prompt for ordinary downstream nodes), whereas `prompts_text` is one single newline-separated string. The text output may be ambiguous if a prompt itself contains newlines; use `prompts` for individual prompt processing. If no prompts are selected, `prompts` is empty and downstream list-executed nodes might not run.
+
+
+
+## Image replay: import a directory of selected images
+
+The **📚 Prompt Library** node can import replay entries from selected images stored
+on the ComfyUI **server**. Open **Manage prompts → Manage library → Import image
+prompts for replay**. Provide the full directory path *on the RunPod/server*,
+a group name (e.g., "Krea2 favorites"), an optional keyword, and whether to
+scan subdirectories.
+
+1. Choose **Scan image metadata**. The modal reports scanned, recoverable,
+   and skipped files, plus a preview of filenames, seeds and aspect ratios.
+2. Click **Import N prompts into group**. New records are selected automatically.
+   Importing the same source file again skips duplicates, but two different
+   source images with the same caption remain distinct (they may have
+   different seeds or dimensions).
+3. Select/deselect entries and **Apply & close**. Save the ComfyUI workflow.
+4. Run the usual **Selected**, **Random N**, or **Sequential N** list mode;
+   all outputs remain index-aligned after slicing/shuffling.
+
+Replay inputs are **PNG, JPEG or WebP** with supported metadata. Supported
+sources include A1111-style \`parameters\` and ComfyUI execution \`prompt\`
+graphs with traceable positive text and sampler seeds (including basic
+KSampler and SamplerCustomAdvanced/RandomNoise paths). Files without
+recoverable positive prompt text are **skipped**, not guessed. Heavily
+customized pipelines, missing metadata, or images whose metadata only
+contains a static graph rather than a resolved dynamic prompt may not
+be reconstructable. The scan does not import pixel data into the JSON.
+
+### 📚 Prompt Library output sockets
+
+The first three sockets remain in their original positions. New sockets
+are **appended** so saved workflows keep existing connections:
+
+| Output | Data type | Purpose |
+|---|---|---|
+| \`prompts\` | STRING list | One caption per downstream execution |
+| \`prompts_text\` | STRING | Newline-delimited diagnostic |
+| \`prompt_count\` | INT | Count of executed entries |
+| \`seeds\` | INT list | Original image's sampler seed |
+| \`aspect_ratios\` | STRING list | Ratio such as \`4:5\` |
+| \`widths\` | INT list | Exported image pixel width |
+| \`heights\` | INT list | Exported image pixel height |
+
+**Unknown values:** Missing seeds are \`-1\` (intentional invalid sentinel,
+not a fabricated seed); missing aspect ratios are \`""\`; missing
+width/height are \`0\`. Normal manually typed prompts therefore have
+unknown seed/dimensions until imported with metadata. Do not connect
+\`seeds\` for those entries to a sampler unless you supply a fallback.
+
+Seed values are stored in JSON as **decimal strings** to preserve all
+64 bits across the browser's JavaScript serialization; the ComfyUI socket
+converts them back to exact INTs during execution. Image-file paths are
+provenance labels; selected text and metadata are embedded into the
+workflow, so replay does not need the original image directory at
+execution time.
+
+For an exact replay, leave the node's \`trigger\` input empty if the
+recovered prompt already includes its LoRA trigger. Images may have been
+upscaled/cropped; \`widths\`/\`heights\` reflect **saved image dimensions**,
+not necessarily the original sampling latent. Ratios are simplified to
+common proportions where the dimensions are very close.
+
+**Directory access:** A browser file chooser cannot read a RunPod
+directory; this importer uses a server-side absolute path. Optionally
+set \`COMFYUI_PROMPT_LIBRARY_IMAGE_ROOT=/workspace/ComfyUI/output\` before
+starting ComfyUI to restrict which folders the API can scan. Use
+ComfyUI's normal access control; anyone able to call the API with
+access to your instance may inspect readable image prompt metadata.
+
+The replay outputs use native ComfyUI **list execution** within a single
+queued graph. They do not automatically schedule separate queue jobs
+or persist progress. For a large Krea2 render set, verify the downstream
+samplers handle lists without exhausting VRAM; automatic one-per-run
+queueing is currently implemented for the separate Dataset Prompt Queue.
 
 
 ## Checking that prompts actually execute
@@ -118,7 +195,7 @@ This node adds a database-backed, **non-executing** dataset explorer. Browse/fil
 5. Enter **include/exclude caption tags** (press Enter; remove pills with ×). Include supports **ALL / ANY**; exclusions reject captions containing **any** excluded term.
 6. Check individual results or **Check page**; alternatively set **Apply mode** to *All matching prompts* or *Random N from matches* (with a seed). **Apply Selection** freezes captions in the workflow; **Cancel** discards pending selection changes.
 7. On the node configure **replace_name** (default: Alice) and **trigger_word** (for example your LoRA trigger). Literal, case-insensitive whole-word replacement happens **during execution**, without modifying the dataset or snapshot.
-8. Connect **prompts** (ComfyUI list output) to the Krea2 conditioning flow. Other outputs are **prompts_text** (diagnostic joined string), **prompt_count**, and **metadata_json** (source identifiers and per-row metadata).
+8. Connect **prompts** (ComfyUI list output) to the Krea2 conditioning flow. Other outputs are **prompts_text** (diagnostic joined string), **prompt_count**, **metadata_json** (source identifiers and per-row metadata), and **aspect_ratios** (STRING list, one CSV `Aspect Ratio` field per caption).
 
 Dataset character names are placeholders: Alice/Bella/Clara/Diana/Emma and Adam/Bob/Charlie/David/Eric. The replacement field can target any one. An empty trigger leaves captions unchanged.
 
@@ -187,7 +264,7 @@ Compact controls are inspired by [shootthesound's MIT-licensed Sequential Image 
 
 **Key implementation detail:** the frontend hooks ComfyUI's queue submission *after* asynchronous graph serialization, then advances its hidden **sequence_index** for the following queue. The Python node receives the index already serialized into that execution, emits one caption, and reports the **actual executed index/total** in its UI receipt. After an execution-success event, the queue controller requests the next run. Errors or interruptions stop auto-queue. The last prompt stops automatic queueing instead of looping forever.
 
-**Outputs:** prompt (single STRING), index (0-based INT), total (INT), metadata_json (STRING). The metadata includes dataset/revision/record ID and row metadata. The original 📚 Dataset Prompt Browser **prompts** output remains a native multi-prompt ComfyUI list; its behavior has not changed.
+**Outputs:** prompt (single STRING), index (0-based INT), total (INT), metadata_json (STRING), **aspect_ratio (single STRING)**. The metadata includes dataset/revision/record ID and row metadata. Aspect ratios come directly from the imported CSV/Parquet `Aspect Ratio` column (e.g. `2:3` or `4:5`), **not** from parsing prompt text; they are embedded in the workflow's frozen selection. Wire the ratio to an AR-to-dimensions/MP node that accepts a STRING ratio. Nodes expecting a fixed COMBO may need a converter. The original 📚 Dataset Prompt Browser **prompts** output remains a native multi-prompt ComfyUI list; its behavior has not changed.
 
 **Limitations:** queue-all state is tied to the active browser/ComfyUI session, not a persistent server-side job. The current position is stored in the workflow as a hidden serialized widget, but currently-running jobs and completion/error history are not persisted. Avoid running multiple auto-queue controllers or using ComfyUI's built-in Auto Queue simultaneously on the same graph. For production-scale thousands-of-image work, a future server-backed job ledger should handle retries and resume-from-completed rather than assuming the pointer means success. This first implementation is subject to frontend validation against your deployed ComfyUI build.
 
