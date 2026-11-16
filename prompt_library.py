@@ -221,8 +221,100 @@ class PromptLibraryNode:
         }
 
 
-NODE_CLASS_MAPPINGS = {"PromptLibraryNode": PromptLibraryNode}
-NODE_DISPLAY_NAME_MAPPINGS = {"PromptLibraryNode": "📚 Prompt Library"}
+
+class PromptLibraryQueueNode:
+    """Generate exactly one selected library prompt per queued workflow execution.
+
+    The browser controller advances sequence_index only after submission has
+    serialized; this node always uses the serialized value and frozen snapshot.
+    """
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "library_name": ("STRING", {"default": "default"}),
+            "selection_json": ("STRING", {"default": '{"version":1,"selected":[]}'}),
+            "trigger": ("STRING", {"default": "", "multiline": False}),
+            "sequence_index": ("INT", {"default": 0, "min": 0, "max": MAX_PROMPTS - 1, "step": 1}),
+        }}
+
+    RETURN_TYPES = ("STRING", "INT", "INT", "STRING", "STRING", "INT", "INT", "INT")
+    RETURN_NAMES = ("prompt", "index", "total", "sidecar_json", "aspect_ratio",
+                    "source_seed", "source_width", "source_height")
+    OUTPUT_NODE = True
+    FUNCTION = "run"
+    CATEGORY = "Prompt Library"
+    DESCRIPTION = "Queue one prompt per workflow run, preserving group and prompt provenance."
+
+    @classmethod
+    def IS_CHANGED(cls, library_name, selection_json, trigger, sequence_index):
+        payload = json.dumps((selection_json, trigger, int(sequence_index)),
+                             ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def run(library_name, selection_json, trigger, sequence_index):
+        snapshot = json.loads(selection_json)
+        entries = selected_entries(selection_json)
+        total = len(entries)
+        if not total:
+            raise ValueError("Prompt Library Queue has no selected prompts. Open Prompt Manager and Apply & close.")
+        index = int(sequence_index)
+        if not 0 <= index < total:
+            raise ValueError(f"Sequence index {index} is out of range for {total} selected prompts.")
+        entry = entries[index]
+        prefix = trigger.strip()
+        prompt = f"{prefix}, {entry['text']}" if prefix else entry["text"]
+        aspect_ratio = _aspect_metadata(entry)
+        source_seed = _int_metadata(entry, "seed", -1)
+        source_width = _int_metadata(entry, "width", 0)
+        source_height = _int_metadata(entry, "height", 0)
+        # Runtime generation seed is intentionally NOT inferred from an imported
+        # source image. The saver captures the actual sampler seed separately.
+        provenance = {
+            "library": snapshot.get("library") or library_name,
+            "prompt_id": entry.get("id"),
+            "queue_index": index,
+            "queue_total": total,
+        }
+        for key in ("group_id", "group_name", "group_keyword", "group_index", "group_position",
+                    "source_file"):
+            if entry.get(key) is not None:
+                provenance[key] = entry[key]
+        if aspect_ratio:
+            provenance["aspect_ratio"] = aspect_ratio
+        if source_seed >= 0:
+            provenance["source_seed"] = source_seed
+        if source_width > 0:
+            provenance["source_width"] = source_width
+        if source_height > 0:
+            provenance["source_height"] = source_height
+        sidecar = {
+            "version": 1,
+            "tags": [],
+            "controls": {},
+            "prompts": {"generation": {"positive": prompt, "negative": ""}},
+            "origin": {
+                "generation": {"settings": {}},
+                "prompt_library": provenance,
+            },
+            "history": [],
+        }
+        return {
+            "ui": {"prompt_library_queue": [{
+                "index": index, "total": total,
+                "prompt_id": entry.get("id"),
+                "group_name": provenance.get("group_name", ""),
+                "prompt": prompt[:320],
+            }]},
+            "result": (prompt, index, total, json.dumps(sidecar, ensure_ascii=False),
+                       aspect_ratio, source_seed, source_width, source_height),
+        }
+
+
+NODE_CLASS_MAPPINGS = {"PromptLibraryNode": PromptLibraryNode, "PromptLibraryQueueNode": PromptLibraryQueueNode}
+NODE_DISPLAY_NAME_MAPPINGS = {"PromptLibraryNode": "📚 Prompt Library",
+                              "PromptLibraryQueueNode": "📚 Prompt Library Queue"}
 
 
 def register_routes():

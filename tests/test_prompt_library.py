@@ -88,6 +88,58 @@ class PromptLibraryTests(unittest.TestCase):
         self.assertEqual(output["result"], ([], "", 0, [], [], [], [],))
         self.assertEqual(output["ui"]["prompt_library"][0]["count"], 0)
 
+    def test_queue_canonical_sidecar_preserves_group_and_source_provenance(self):
+        selected = [
+            {"id": "light-7", "text": "Soft window lighting",
+             "group_id": "lighting", "group_name": "Lighting and Camera",
+             "group_keyword": "light", "group_index": 6, "group_position": 7,
+             "seed": "1234567890123456789", "aspect_ratio": "4:5",
+             "width": 1024, "height": 1280, "source_file": "/input/example.png"},
+            {"id": "base-1", "text": "Looking at camera",
+             "group_id": "base", "group_name": "Base", "group_index": 0,
+             "group_position": 1},
+        ]
+        snap = json.dumps({"version": 1, "library": "Portraits", "selected": selected})
+        node = module.PromptLibraryQueueNode
+        self.assertEqual(node.OUTPUT_NODE, True)
+        self.assertNotIn("OUTPUT_IS_LIST", node.__dict__)
+        result = node.run("default", snap, "sH1VX woman", 0)
+        prompt, index, total, sidecar_json, ratio, source_seed, width, height = result["result"]
+        self.assertEqual((index, total), (0, 2))
+        self.assertEqual(prompt, "sH1VX woman, Soft window lighting")
+        self.assertEqual((ratio, source_seed, width, height),
+                         ("4:5", 1234567890123456789, 1024, 1280))
+        doc = json.loads(sidecar_json)
+        self.assertEqual(doc["prompts"]["generation"]["positive"], prompt)
+        self.assertEqual(doc["origin"]["generation"], {"settings": {}})
+        provenance = doc["origin"]["prompt_library"]
+        self.assertEqual(provenance["library"], "Portraits")
+        self.assertEqual(provenance["group_name"], "Lighting and Camera")
+        self.assertEqual(provenance["group_id"], "lighting")
+        self.assertEqual(provenance["prompt_id"], "light-7")
+        self.assertEqual((provenance["group_index"], provenance["group_position"]), (6, 7))
+        self.assertEqual(provenance["source_seed"], 1234567890123456789)
+        self.assertEqual(provenance["queue_total"], 2)
+        self.assertNotIn("seed", doc["origin"]["generation"])
+        result2 = node.run("default", snap, "", 1)["result"]
+        doc2 = json.loads(result2[3])
+        self.assertEqual(doc2["origin"]["prompt_library"]["group_name"], "Base")
+        self.assertEqual(result2[5:], (-1, 0, 0))
+        self.assertNotIn("source_seed", doc2["origin"]["prompt_library"])
+        self.assertNotEqual(node.IS_CHANGED("default", snap, "", 0),
+                            node.IS_CHANGED("default", snap, "", 1))
+
+    def test_queue_old_snapshot_and_out_of_range(self):
+        snapshot = '{"version":1,"selected":[{"id":"old","text":"Original prompt"}]}'
+        doc = json.loads(module.PromptLibraryQueueNode.run(
+            "default", snapshot, "", 0)["result"][3])
+        self.assertEqual(doc["origin"]["prompt_library"]["prompt_id"], "old")
+        self.assertNotIn("group_name", doc["origin"]["prompt_library"])
+        with self.assertRaisesRegex(ValueError, "no selected prompts"):
+            module.PromptLibraryQueueNode.run("default", '{"version":1,"selected":[]}', "", 0)
+        with self.assertRaisesRegex(ValueError, "out of range"):
+            module.PromptLibraryQueueNode.run("default", snapshot, "", 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -180,6 +180,49 @@ node --check web/prompt_library.js  # if Node.js is installed
 - The default library directory is server-wide, designed for self-hosted ComfyUI; it is not an isolated, permissioned multi-user library service.
 
 
+
+## 📚 Prompt Library Queue — sequential manual collections
+
+Add **Prompt Library → 📚 Prompt Library Queue** to run prompts from the normal
+JSON-backed Prompt Library, one complete workflow execution per selected prompt.
+It uses the **same Open Prompt Manager** and frozen `selection_json` as
+📚 Prompt Library. Click **Apply & close** to snapshot selected prompts and reset
+the queue to zero, then click **▶ Queue remaining**. The control panel (reset,
+scrub, prev/next, hold, stop, current/next previews) is shared with Dataset
+Prompt Queue, and auto-queue stops after the final successful generation or
+an error/interruption. Keep the ComfyUI tab open during auto-queue; only one
+queue controller per graph should be active. Do not enable ComfyUI Auto Queue
+at the same time.
+
+**Outputs:** `prompt` (one STRING, including optional trigger prefix),
+`index` (0-based), `total`, **`sidecar_json`** (one canonical generation
+sidecar), `aspect_ratio`, `source_seed`, `source_width`, `source_height`.
+A source seed is the **seed imported with the prompt**, not necessarily the
+seed used by the sampler; missing source values use -1 / 0 / "". Do not
+connect `source_seed` to a sampler without a fallback for missing values.
+
+When you apply a Prompt Library selection, each frozen entry now retains
+its collection `group_id`, `group_name`, `group_keyword`, stable
+`prompt_id`, and `group_index` (0-based) / `group_position` (1-based), in
+addition to optional imported image provenance. These values are written
+under `origin.prompt_library` in the sidecar JSON, alongside
+`origin.prompt_library.queue_index` / `queue_total`. Stable IDs survive
+reordering; the positional index describes the group ordering at Apply time.
+For older saved workflows, re-apply the selection to populate these new
+fields (older snapshots without group data still execute).
+
+Connect `prompt` to the text encoder and **`sidecar_json` directly to
+Image Utils · Save Image + Sidecar (Embedded)**; **no MR Sidecar Initialize
+is needed**. Set the saver `stage` to `generation`, and connect your
+**actual sampler seed** to the saver's `seed` input. Optionally supply
+`positive_prompt` (if further transformed), `negative_prompt`,
+`model_name`, and `settings_json`; the generation-stage saver merges these
+into the existing canonical sidecar while preserving collection IDs and
+source-image metadata. Do not use this generation-stage merge for subsequent
+detail/refinement saves, which should preserve the original record and append
+processing events instead.
+
+
 ## Dataset Prompt Browser (CSV / Parquet)
 
 Add **📚 Dataset Prompt Browser** alongside the existing **📚 Prompt Library** node. The original manual prompt manager and its version 1 JSON format remain unchanged.

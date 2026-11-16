@@ -4,8 +4,11 @@ import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 const TYPE = "PromptDatasetQueueNode";
+const LIBRARY_TYPE = "PromptLibraryQueueNode";
+const TYPES = new Set([TYPE, LIBRARY_TYPE]);
+const isLibrary = n => n.type === LIBRARY_TYPE;
 const widget = (n, name) => n.widgets?.find(w => w.name === name);
-const allNodes = () => (app.graph?._nodes || []).filter(n => n.type === TYPE);
+const allNodes = () => (app.graph?._nodes || []).filter(n => TYPES.has(n.type));
 const btn = (text, cb) => {
     const e = document.createElement("button");
     e.type = "button"; e.textContent = text; e.onclick = cb; return e;
@@ -32,6 +35,10 @@ function setIndex(n, value) {
 }
 function caption(n, item) {
     if (!item?.text) return "—";
+    if (isLibrary(n)) {
+        const prefix = String(widget(n, "trigger")?.value || "").trim();
+        return prefix ? prefix + ", " + item.text : item.text;
+    }
     const search = String(widget(n, "replace_name")?.value || "").trim();
     const trigger = String(widget(n, "trigger_word")?.value || "").trim();
     if (!search || !trigger) return item.text;
@@ -89,7 +96,7 @@ function toggleHold(n, type) {
 }
 async function enqueue(n) {
     try { await app.queuePrompt(0, 1); }
-    catch (err) { console.warn("[PromptDatasetQueue] Queue failed", err); stop(n); }
+    catch (err) { console.warn("[PromptQueue] Queue failed", err); stop(n); }
 }
 function installQueueHook() {
     if (app._pldqQueueHook || typeof app.queuePrompt !== "function") return;
@@ -116,7 +123,7 @@ function installEvents() {
             if (n._pldqRanIndex >= n._pldqRanTotal - 1) {
                 stop(n);
                 app.extensionManager?.toast?.add?.({
-                    severity: "success", summary: "Dataset Prompt Queue",
+                    severity: "success", summary: isLibrary(n) ? "Prompt Library Queue" : "Dataset Prompt Queue",
                     detail: "Completed " + n._pldqRanTotal + " prompts.", life: 4500,
                 });
             } else {
@@ -131,7 +138,7 @@ function installEvents() {
 }
 function attach(n) {
     if (typeof n.addDOMWidget !== "function") {
-        console.warn("[PromptDatasetQueue] DOM widgets unavailable in this ComfyUI frontend");
+        console.warn("[PromptQueue] DOM widgets unavailable in this ComfyUI frontend");
         return;
     }
     const panel = document.createElement("section"); panel.className = "pldq-panel";
@@ -195,7 +202,7 @@ app.registerExtension({
     name: "markwelshboy.DatasetPromptQueue",
     async setup() { installQueueHook(); installEvents(); },
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== TYPE) return;
+        if (!TYPES.has(nodeData.name)) return;
         const originalCreated = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function (...args) {
             const result = originalCreated?.apply(this, args);
@@ -218,7 +225,7 @@ app.registerExtension({
         const executed = nodeType.prototype.onExecuted;
         nodeType.prototype.onExecuted = function (message) {
             executed?.apply(this, arguments);
-            const info = message?.prompt_dataset_queue?.[0];
+            const info = message?.[isLibrary(this) ? "prompt_library_queue" : "prompt_dataset_queue"]?.[0];
             if (!Number.isInteger(info?.index) || !Number.isInteger(info?.total)) return;
             this._pldqRanIndex = info.index;
             this._pldqRanTotal = info.total;

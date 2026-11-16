@@ -186,6 +186,15 @@ function createManager(node) {
                     for (const field of ["seed", "aspect_ratio", "width", "height", "source_file"]) {
                         if (Object.hasOwn(prompt, field)) entry[field] = prompt[field];
                     }
+                    // Freeze the collection and stable prompt ID into the workflow
+                    // so a portable snapshot retains its provenance without the JSON file.
+                    if (prompt.group) {
+                        entry.group_id = prompt.group.id;
+                        entry.group_name = prompt.group.name;
+                        entry.group_keyword = prompt.group.keyword || "";
+                        entry.group_index = prompt.group.prompts.findIndex(p => p.id === prompt.id);
+                        entry.group_position = entry.group_index + 1; // one-based display position
+                    }
                     return entry;
                 }),
             });
@@ -194,6 +203,7 @@ function createManager(node) {
             selectionWidget.serialize = true;
             node._promptLibraryLastCount = undefined;
             widget(node, "library_name").value = state.name;
+            node._pldqOnSelectionApplied?.();
             updateNodeLabel(node);
             node.setDirtyCanvas?.(true, true);
             app.graph?.setDirtyCanvas?.(true, true);
@@ -595,7 +605,7 @@ if (!document.getElementById(styleId)) {
 app.registerExtension({
     name: "markwelshboy.PromptLibrary",
     async beforeRegisterNodeDef(nodeType, nodeData) {
-        if (nodeData.name !== "PromptLibraryNode") return;
+        if (nodeData.name !== "PromptLibraryNode" && nodeData.name !== "PromptLibraryQueueNode") return;
         const previous = nodeType.prototype.onNodeCreated;
         nodeType.prototype.onNodeCreated = function (...args) {
             const result = previous?.apply(this, args);
@@ -618,9 +628,13 @@ app.registerExtension({
         nodeType.prototype.onExecuted = function (message) {
             previousExecuted?.apply(this, arguments);
             const receipt = message?.prompt_library?.[0];
+            const queueReceipt = message?.prompt_library_queue?.[0];
             if (receipt && Number.isInteger(receipt.count)) {
                 this._promptLibraryLastCount = receipt.count;
                 this._promptLibraryLastPreview = receipt.preview || [];
+            } else if (queueReceipt && Number.isInteger(queueReceipt.index)) {
+                this._promptLibraryLastCount = 1;
+                this._promptLibraryLastPreview = [queueReceipt.prompt];
             }
             updateNodeLabel(this);
             app.graph?.setDirtyCanvas?.(true, true);
